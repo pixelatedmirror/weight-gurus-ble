@@ -203,48 +203,100 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            address = user_input[CONF_ADDRESS].strip()
-            await self.async_set_unique_id(address.lower())
-            self._abort_if_unique_id_configured()
+            address = user_input.get(CONF_ADDRESS, "").strip()
+            manual_address = user_input.get("manual_mac", "").strip()
 
-            self._discovered_address = address
-            self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
-            return await self.async_step_confirm()
+            target_address = manual_address if manual_address else address
 
-        # Discover devices and highlight scale-like names
+            if target_address == "manual" or not target_address:
+                return await self.async_step_manual_mac()
+
+            # Normalize MAC address
+            clean_mac = target_address.replace("-", ":").upper()
+            if len(clean_mac.split(":")) != 6:
+                errors["base"] = "invalid_mac"
+            else:
+                await self.async_set_unique_id(clean_mac.lower())
+                self._abort_if_unique_id_configured()
+
+                self._discovered_address = clean_mac
+                self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
+                return await self.async_step_confirm()
+
+        # Discover devices and strictly filter for scale candidates only
         scale_candidates: dict[str, str] = {}
-        other_devices: dict[str, str] = {}
 
         for service_info in async_discovered_service_info(self.hass, connectable=True):
-            addr = service_info.address
-            name = service_info.name or "Unknown device"
+            addr = service_info.address.upper()
+            name = service_info.name or ""
             name_lower = name.lower()
-            if any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek")):
-                scale_candidates[addr] = f"{name} ({addr})"
-            else:
-                other_devices[addr] = f"{name} ({addr})"
+            service_uuids = [str(u).lower() for u in (service_info.service_uuids or [])]
 
-        discovered_devices = {**scale_candidates, **other_devices}
+            is_scale_candidate = (
+                any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek"))
+                or addr.startswith("04:7B:CB")
+                or any("0d005750" in u or "000078b2" in u for u in service_uuids)
+            )
+
+            if is_scale_candidate:
+                display_name = name or "Weight Gurus Scale"
+                scale_candidates[addr] = f"{display_name} ({addr})"
 
         schema_dict: dict[Any, Any] = {}
-        if discovered_devices:
+
+        if scale_candidates:
+            options = [
+                SelectOptionDict(value=addr, label=desc)
+                for addr, desc in scale_candidates.items()
+            ]
+            options.append(
+                SelectOptionDict(value="manual", label="Enter MAC address manually...")
+            )
             schema_dict[vol.Required(CONF_ADDRESS)] = SelectSelector(
                 SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=addr, label=desc)
-                        for addr, desc in discovered_devices.items()
-                    ],
+                    options=options,
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
         else:
-            schema_dict[vol.Required(CONF_ADDRESS)] = TextSelector()
+            schema_dict[vol.Required(CONF_ADDRESS, default="04:7B:CB:DF:95:CF")] = TextSelector()
 
         schema_dict[vol.Optional(CONF_NAME, default=DEFAULT_NAME)] = TextSelector()
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(schema_dict),
+            errors=errors,
+        )
+
+    async def async_step_manual_mac(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step to enter MAC address manually."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            clean_mac = user_input[CONF_ADDRESS].strip().replace("-", ":").upper()
+            if len(clean_mac.split(":")) != 6:
+                errors["base"] = "invalid_mac"
+            else:
+                await self.async_set_unique_id(clean_mac.lower())
+                self._abort_if_unique_id_configured()
+
+                self._discovered_address = clean_mac
+                self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
+                return await self.async_step_confirm()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ADDRESS, default="04:7B:CB:DF:95:CF"): TextSelector(),
+                vol.Optional(CONF_NAME, default=DEFAULT_NAME): TextSelector(),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="manual_mac",
+            data_schema=schema,
             errors=errors,
         )
 

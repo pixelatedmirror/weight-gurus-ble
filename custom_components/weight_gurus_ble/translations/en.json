@@ -5,7 +5,15 @@
         "title": "Set up Weight Gurus Scale",
         "description": "Select your discovered Weight Gurus scale or enter its Bluetooth MAC address manually.",
         "data": {
-          "address": "Bluetooth Device",
+          "address": "Bluetooth Scale",
+          "name": "Integration Name"
+        }
+      },
+      "manual_mac": {
+        "title": "Enter Scale MAC Address",
+        "description": "Enter the Bluetooth MAC address of your Weight Gurus scale (found on the scale label or from your previous logs).",
+        "data": {
+          "address": "Bluetooth MAC Address",
           "name": "Integration Name"
         }
       },
@@ -20,6 +28,9 @@
           "gender": "Gender"
         }
       }
+    },
+    "error": {
+      "invalid_mac": "Invalid Bluetooth MAC address format (must be 6 hex byte pairs separated by colons, e.g. 04:7B:CB:DF:95:CF)."
     },
     "abort": {
       "already_configured": "This scale is already configured in Home Assistant.",
