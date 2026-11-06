@@ -132,6 +132,7 @@ class WeightGurusCoordinator:
     ) -> None:
         """Handle incoming Bluetooth advertisements when the scale is stepped on."""
         self.last_rssi = service_info.rssi
+        self._async_notify_listeners()
 
         # Check advertisement freshness to avoid connecting to cached/stale advertisements
         adv_time = getattr(service_info, "time", None)
@@ -227,39 +228,60 @@ class WeightGurusCoordinator:
                 # 1. Lifesense LS212-B Protocol
                 if "a621" in char_map:
                     _LOGGER.info("Detected Lifesense LS212-B GATT service on %s, starting handshake", self.mac)
-                    packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
+                    packet_queue: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
 
                     def lifesense_notify_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
                         raw = bytes(data)
                         _LOGGER.debug("Lifesense notify on %s: %s", char.uuid, raw.hex())
-                        packet_queue.put_nowait(raw)
+                        packet_queue.put_nowait(("a621", raw))
 
                     def lifesense_ack_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        raw = bytes(data)
                         _LOGGER.debug("Lifesense scale ACK on %s: %s", char.uuid, bytes(data).hex())
+                        packet_queue.put_nowait(("a625", raw))
 
                     def lifesense_indicate_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        raw = bytes(data)
                         _LOGGER.debug("Lifesense indication on %s: %s", char.uuid, bytes(data).hex())
+                        packet_queue.put_nowait(("a620", raw))
 
                     if "a621" in char_map:
                         await client.start_notify(char_map["a621"], lifesense_notify_handler)
                     if "a625" in char_map:
-                        await client.start_notify(char_map["a625"], lifesense_ack_handler)
+                        try:
+                            await client.start_notify(char_map["a625"], lifesense_ack_handler)
+                        except Exception as err:
+                            _LOGGER.debug("Optional a625 subscription returned: %s", err)
                     if "a620" in char_map:
-                        await client.start_notify(char_map["a620"], lifesense_indicate_handler)
+                        try:
+                            await client.start_notify(char_map["a620"], lifesense_indicate_handler)
+                        except Exception as err:
+                            _LOGGER.debug("Optional a620 subscription returned: %s", err)
 
                     subscribed_any = True
 
                     # Run handshake loop until measurement record received or timeout
-                    end_time = time.monotonic() + 12.0
+                    end_time = time.monotonic() + 15.0
+                    time_sync_sent = False
+                    user_req_sent = False
+
                     while time.monotonic() < end_time and not received_data_event.is_set():
                         try:
                             timeout_remain = max(0.5, end_time - time.monotonic())
-                            raw = await asyncio.wait_for(packet_queue.get(), timeout=min(3.0, timeout_remain))
+                            source_key, raw = await asyncio.wait_for(
+                                packet_queue.get(),
+                                timeout=min(2.0, timeout_remain),
+                            )
                         except asyncio.TimeoutError:
+                            # Fallback if scale ACK on a625 was dropped or missed
+                            if time_sync_sent and not user_req_sent and "a624" in char_map:
+                                user_req_sent = True
+                                _LOGGER.debug("Timeout waiting for scale ACK on a625; sending user request directly")
+                                await client.write_gatt_char(char_map["a624"], b"\x10\x03\x10\x04\x01", response=False)
                             continue
 
-                        # Greeting: 10 0a 00 07 ...
-                        if raw.startswith(b"\x10\x0a"):
+                        # 1. Scale Greeting: 10 0a 00 07 ...
+                        if source_key == "a621" and raw.startswith(b"\x10\x0a"):
                             if "a622" in char_map:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             if "a624" in char_map:
@@ -269,8 +291,8 @@ class WeightGurusCoordinator:
                                     response=False,
                                 )
 
-                        # Time sync request: 10 03 00 09 18
-                        elif raw.startswith(b"\x10\x03"):
+                        # 2. Scale Time Sync Request: 10 03 00 09 18
+                        elif source_key == "a621" and raw.startswith(b"\x10\x03"):
                             if "a622" in char_map:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             if "a624" in char_map:
@@ -278,10 +300,17 @@ class WeightGurusCoordinator:
                                 ts_be = struct.pack(">I", now_ts)
                                 time_cmd = b"\x10\x08\x00\x0a\x18" + ts_be + b"\x10"
                                 await client.write_gatt_char(char_map["a624"], time_cmd, response=False)
+                                time_sync_sent = True
+
+                        # 3. Scale ACK on a625: 00 01 01
+                        elif source_key == "a625" and raw == b"\x00\x01\x01":
+                            if time_sync_sent and not user_req_sent and "a624" in char_map:
+                                user_req_sent = True
+                                await asyncio.sleep(0.05)
                                 await client.write_gatt_char(char_map["a624"], b"\x10\x03\x10\x04\x01", response=False)
 
-                        # User response: 10 05 10 00 10 04 01
-                        elif raw.startswith(b"\x10\x05\x10\x00\x10\x04"):
+                        # 4. Scale User Response: 10 05 10 00 10 04 01
+                        elif source_key == "a621" and raw.startswith(b"\x10\x05\x10\x00\x10\x04"):
                             if "a622" in char_map:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             if "a624" in char_map:
@@ -293,15 +322,15 @@ class WeightGurusCoordinator:
                                     response=False,
                                 )
 
-                        # Record ready response: 10 05 10 00 10 02
-                        elif raw.startswith(b"\x10\x05\x10\x00\x10\x02"):
+                        # 5. Scale Record Ready: 10 05 10 00 10 02
+                        elif source_key == "a621" and raw.startswith(b"\x10\x05\x10\x00\x10\x02"):
                             if "a622" in char_map:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             if "a624" in char_map:
                                 await client.write_gatt_char(char_map["a624"], b"\x10\x04\x48\x01\x00\x01", response=False)
 
-                        # Measurement record: 10 10 48 02 ...
-                        elif raw.startswith(b"\x10\x10\x48\x02") or (len(raw) >= 16 and raw[2] == 0x48):
+                        # 6. Scale Measurement Record: 10 10 48 02 ...
+                        elif source_key == "a621" and (raw.startswith(b"\x10\x10\x48\x02") or (len(raw) >= 16 and raw[2] == 0x48)):
                             if "a622" in char_map:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             self._parse_lifesense_record(raw)
@@ -403,6 +432,7 @@ class WeightGurusCoordinator:
                 raw_weight,
                 self.last_measurement.isoformat(),
             )
+            self._async_notify_listeners()
         except Exception as err:
             _LOGGER.warning("Error parsing Lifesense record: %s", err)
 
