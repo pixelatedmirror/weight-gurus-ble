@@ -16,7 +16,7 @@
       }
     },
     "error": {
-      "invalid_mac": "Invalid Bluetooth MAC address format (must be 6 hex byte pairs separated by colons, e.g. 04:7B:CB:DF:95:CF)."
+      "invalid_mac": "Invalid Bluetooth MAC address format (must be 6 hex byte pairs separated by colons, e.g. A4:C1:38:36:65:D3)."
     },
     "abort": {
       "already_configured": "This scale is already configured in Home Assistant.",

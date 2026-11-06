@@ -19,6 +19,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
@@ -113,10 +116,15 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         is_metric = _is_metric(self.hass)
 
         if user_input is not None:
-            raw_address = (
-                user_input.get("manual_mac", "").strip()
-                or user_input.get(CONF_ADDRESS, self._discovered_address or "").strip()
-            )
+            selected_addr = user_input.get(CONF_ADDRESS, "").strip()
+            manual_addr = user_input.get("manual_mac", "").strip()
+            if manual_addr:
+                raw_address = manual_addr
+            elif selected_addr and selected_addr != "manual":
+                raw_address = selected_addr
+            else:
+                raw_address = self._discovered_address or ""
+
             clean_mac = raw_address.replace("-", ":").upper()
 
             parts = clean_mac.split(":")
@@ -147,7 +155,7 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Discover devices and filter for scale candidates
         scale_candidates: dict[str, str] = {}
-        for service_info in async_discovered_service_info(self.hass, connectable=True):
+        for service_info in async_discovered_service_info(self.hass, connectable=False):
             addr = service_info.address.upper()
             name = service_info.name or ""
             name_lower = name.lower()
@@ -156,7 +164,6 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if (
                 any(p in name_lower for p in ("ls212", "lifesense", "0383", "0376", "gbf", "weight", "transtek", "greater", "goods", "scale"))
                 or addr.startswith("A4:C1:38")
-                or addr.startswith("04:7B:CB")
                 or any("20568521" in u or "0d005750" in u or "000078b2" in u or "0000181d" in u or "0000181b" in u for u in service_uuids)
             ):
                 display_name = name or "Weight Gurus Scale"
@@ -176,17 +183,22 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema_dict: dict[Any, Any] = {}
 
         if scale_candidates:
-            options = dict(scale_candidates)
-            options["manual"] = "Enter another MAC address below"
+            options = [
+                {"value": k, "label": v}
+                for k, v in scale_candidates.items()
+            ]
+            options.append({"value": "manual", "label": "Enter MAC address manually below"})
             default_addr = (
                 self._discovered_address
                 if (self._discovered_address and self._discovered_address in scale_candidates)
                 else next(iter(scale_candidates))
             )
-            schema_dict[vol.Required(CONF_ADDRESS, default=default_addr)] = vol.In(options)
+            schema_dict[vol.Required(CONF_ADDRESS, default=default_addr)] = SelectSelector(
+                SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
+            )
             schema_dict[vol.Optional("manual_mac", default="")] = str
         else:
-            schema_dict[vol.Required(CONF_ADDRESS)] = str
+            schema_dict[vol.Required(CONF_ADDRESS, default="A4:C1:38:36:65:D3")] = str
 
         schema_dict[vol.Required(CONF_NAME, default=self._discovered_device_name or DEFAULT_NAME)] = str
         schema_dict[vol.Required(CONF_HEIGHT, default=default_height)] = NumberSelector(
