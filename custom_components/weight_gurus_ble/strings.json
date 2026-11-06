@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Weight Gurus Scale",
+        "description": "Select your discovered Weight Gurus scale or enter its Bluetooth MAC address manually.",
+        "data": {
+          "address": "Bluetooth Device",
+          "name": "Integration Name"
+        }
+      },
+      "confirm": {
+        "title": "Configure Weight Gurus Scale ({name})",
+        "description": "Configure your scale and user profile settings. Height is used to calculate BMI.",
+        "data": {
+          "name": "Device Name",
+          "height_cm": "Height (cm)",
+          "age": "Age",
+          "gender": "Gender"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This scale is already configured in Home Assistant.",
+      "not_supported": "The discovered device is not a supported Weight Gurus scale."
+    }
+  }
+}
