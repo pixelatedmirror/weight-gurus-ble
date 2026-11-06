@@ -114,7 +114,7 @@ class WeightGurusCoordinator:
             self.hass,
             self._async_on_bluetooth_event,
             BluetoothCallbackMatcher(address=self.mac, connectable=True),
-            BluetoothScanningMode.ACTIVE,
+            BluetoothScanningMode.PASSIVE,
         )
 
     async def async_stop(self) -> None:
@@ -132,8 +132,20 @@ class WeightGurusCoordinator:
     ) -> None:
         """Handle incoming Bluetooth advertisements when the scale is stepped on."""
         self.last_rssi = service_info.rssi
+
+        # Check advertisement freshness to avoid connecting to cached/stale advertisements
+        adv_time = getattr(service_info, "time", time.monotonic())
+        age = time.monotonic() - adv_time
+        if age > 10.0:
+            _LOGGER.debug(
+                "Ignoring stale advertisement for %s (age=%.1fs > 10s); scale is currently asleep",
+                self.mac,
+                age,
+            )
+            return
+
         _LOGGER.debug(
-            "Scale advertised: address=%s, rssi=%d, source=%s. Initiating connection.",
+            "Fresh scale advertisement received: address=%s, rssi=%d, source=%s. Initiating connection.",
             service_info.address,
             service_info.rssi,
             service_info.source,
@@ -252,8 +264,13 @@ class WeightGurusCoordinator:
                     except Exception:
                         pass
 
+            except TimeoutError:
+                _LOGGER.debug(
+                    "Timed out connecting to Weight Gurus scale %s; scale may have already gone to sleep",
+                    self.mac,
+                )
             except Exception as err:
-                _LOGGER.error("Error communicating with Weight Gurus scale %s: %s", self.mac, err)
+                _LOGGER.warning("Communication issue with Weight Gurus scale %s: %s", self.mac, err)
             finally:
                 if client is not None and client.is_connected:
                     try:
