@@ -9,63 +9,49 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/pixelatedmirror/weight-gurus-ble/issues",
   "requirements": ["bleak-retry-connector>=3.5.0"],
-  "version": "0.2.1",
+  "version": "0.2.2",
   "bluetooth": [
     {
-      "local_name": "LS212*",
-      "connectable": true
+      "local_name": "LS212*"
     },
     {
-      "local_name": "00383B*",
-      "connectable": true
+      "local_name": "00383B*"
     },
     {
-      "local_name": "10383B*",
-      "connectable": true
+      "local_name": "10383B*"
     },
     {
-      "local_name": "00376B*",
-      "connectable": true
+      "local_name": "00376B*"
     },
     {
-      "local_name": "10376B*",
-      "connectable": true
+      "local_name": "10376B*"
     },
     {
-      "local_name": "Weight*",
-      "connectable": true
+      "local_name": "Weight*"
     },
     {
-      "local_name": "GBF*",
-      "connectable": true
+      "local_name": "GBF*"
     },
     {
-      "local_name": "Scale*",
-      "connectable": true
+      "local_name": "Scale*"
     },
     {
-      "local_name": "Greater*",
-      "connectable": true
+      "local_name": "Greater*"
     },
     {
-      "service_uuid": "0d005750-c36b-11e3-9c1a-0800200c9a66",
-      "connectable": true
+      "service_uuid": "0d005750-c36b-11e3-9c1a-0800200c9a66"
     },
     {
-      "service_uuid": "000078b2-0000-1000-8000-00805f9b34fb",
-      "connectable": true
+      "service_uuid": "000078b2-0000-1000-8000-00805f9b34fb"
     },
     {
-      "service_uuid": "0000181d-0000-1000-8000-00805f9b34fb",
-      "connectable": true
+      "service_uuid": "0000181d-0000-1000-8000-00805f9b34fb"
     },
     {
-      "service_uuid": "0000181b-0000-1000-8000-00805f9b34fb",
-      "connectable": true
+      "service_uuid": "0000181b-0000-1000-8000-00805f9b34fb"
     },
     {
-      "service_uuid": "20568521-5acd-4c5a-9294-eb2691c8b8bf",
-      "connectable": true
+      "service_uuid": "20568521-5acd-4c5a-9294-eb2691c8b8bf"
     }
   ]
 }
