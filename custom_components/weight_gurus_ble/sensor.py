@@ -119,6 +119,11 @@ class WeightGurusSensor(SensorEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return True
+
+    @property
     def native_value(self) -> Any:
         """Return the state of the sensor."""
         key = self.entity_description.key

@@ -58,16 +58,6 @@ class WeightGurusCoordinator:
         self.name: str = entry_data.get(CONF_NAME, "Weight Gurus Scale")
         self.height_cm: float = float(entry_data.get("height_cm", entry_data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)))
 
-    def update_profile(self, data: dict[str, Any]) -> None:
-        """Update profile parameters from options flow."""
-        self.entry_data.update(data)
-        if CONF_NAME in data:
-            self.name = data[CONF_NAME]
-        if "height_cm" in data or CONF_HEIGHT in data:
-            self.height_cm = float(data.get("height_cm", data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)))
-            self._calculate_bmi()
-            self._async_notify_listeners()
-
         self._unsubscribe_bluetooth: CALLBACK_TYPE | None = None
         self._listeners: list[Callable[[], None]] = []
         self._connection_lock = asyncio.Lock()
@@ -83,6 +73,16 @@ class WeightGurusCoordinator:
         self.calories: int | None = None
         self.last_measurement: datetime | None = None
         self.last_rssi: int | None = None
+
+    def update_profile(self, data: dict[str, Any]) -> None:
+        """Update profile parameters from options flow."""
+        self.entry_data.update(data)
+        if CONF_NAME in data:
+            self.name = data[CONF_NAME]
+        if "height_cm" in data or CONF_HEIGHT in data:
+            self.height_cm = float(data.get("height_cm", data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)))
+            self._calculate_bmi()
+            self._async_notify_listeners()
 
     @callback
     def async_add_listener(self, update_callback: Callable[[], None]) -> CALLBACK_TYPE:
@@ -113,7 +113,7 @@ class WeightGurusCoordinator:
         self._unsubscribe_bluetooth = bluetooth.async_register_callback(
             self.hass,
             self._async_on_bluetooth_event,
-            BluetoothCallbackMatcher(address=self.mac, connectable=True),
+            BluetoothCallbackMatcher(address=self.mac),
             BluetoothScanningMode.PASSIVE,
         )
 
@@ -134,15 +134,17 @@ class WeightGurusCoordinator:
         self.last_rssi = service_info.rssi
 
         # Check advertisement freshness to avoid connecting to cached/stale advertisements
-        adv_time = getattr(service_info, "time", time.monotonic())
-        age = time.monotonic() - adv_time
-        if age > 10.0:
-            _LOGGER.debug(
-                "Ignoring stale advertisement for %s (age=%.1fs > 10s); scale is currently asleep",
-                self.mac,
-                age,
-            )
-            return
+        adv_time = getattr(service_info, "time", None)
+        if adv_time is not None:
+            now = time.time() if adv_time > 1e8 else time.monotonic()
+            age = abs(now - adv_time)
+            if age > 30.0:
+                _LOGGER.debug(
+                    "Ignoring stale advertisement for %s (age=%.1fs > 30s); scale is currently asleep",
+                    self.mac,
+                    age,
+                )
+                return
 
         _LOGGER.debug(
             "Fresh scale advertisement received: address=%s, rssi=%d, source=%s. Initiating connection.",
@@ -172,9 +174,11 @@ class WeightGurusCoordinator:
                 service_info.source,
             )
 
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self.mac, connectable=True
-            ) or service_info.device
+            ble_device = (
+                bluetooth.async_ble_device_from_address(self.hass, self.mac, connectable=True)
+                or bluetooth.async_ble_device_from_address(self.hass, self.mac, connectable=False)
+                or service_info.device
+            )
 
             if not ble_device:
                 _LOGGER.warning(
@@ -223,10 +227,36 @@ class WeightGurusCoordinator:
                 # 1. Lifesense LS212-B Protocol
                 if "a621" in char_map:
                     _LOGGER.info("Detected Lifesense LS212-B GATT service on %s, starting handshake", self.mac)
+                    packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-                    async def lifesense_notify_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                    def lifesense_notify_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
                         raw = bytes(data)
                         _LOGGER.debug("Lifesense notify on %s: %s", char.uuid, raw.hex())
+                        packet_queue.put_nowait(raw)
+
+                    def lifesense_ack_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        _LOGGER.debug("Lifesense scale ACK on %s: %s", char.uuid, bytes(data).hex())
+
+                    def lifesense_indicate_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        _LOGGER.debug("Lifesense indication on %s: %s", char.uuid, bytes(data).hex())
+
+                    if "a621" in char_map:
+                        await client.start_notify(char_map["a621"], lifesense_notify_handler)
+                    if "a625" in char_map:
+                        await client.start_notify(char_map["a625"], lifesense_ack_handler)
+                    if "a620" in char_map:
+                        await client.start_notify(char_map["a620"], lifesense_indicate_handler)
+
+                    subscribed_any = True
+
+                    # Run handshake loop until measurement record received or timeout
+                    end_time = time.monotonic() + 12.0
+                    while time.monotonic() < end_time and not received_data_event.is_set():
+                        try:
+                            timeout_remain = max(0.5, end_time - time.monotonic())
+                            raw = await asyncio.wait_for(packet_queue.get(), timeout=min(3.0, timeout_remain))
+                        except asyncio.TimeoutError:
+                            continue
 
                         # Greeting: 10 0a 00 07 ...
                         if raw.startswith(b"\x10\x0a"):
@@ -276,21 +306,7 @@ class WeightGurusCoordinator:
                                 await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
                             self._parse_lifesense_record(raw)
                             received_data_event.set()
-
-                    def lifesense_ack_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
-                        _LOGGER.debug("Lifesense scale ACK on %s: %s", char.uuid, bytes(data).hex())
-
-                    def lifesense_indicate_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
-                        _LOGGER.debug("Lifesense indication on %s: %s", char.uuid, bytes(data).hex())
-
-                    if "a621" in char_map:
-                        await client.start_notify(char_map["a621"], lifesense_notify_handler)
-                    if "a625" in char_map:
-                        await client.start_notify(char_map["a625"], lifesense_ack_handler)
-                    if "a620" in char_map:
-                        await client.start_notify(char_map["a620"], lifesense_indicate_handler)
-
-                    subscribed_any = True
+                            break
 
                 # 2. Transtek / Standard SIG Protocol Fallback
                 else:
@@ -324,20 +340,20 @@ class WeightGurusCoordinator:
                         except Exception as err:
                             _LOGGER.debug("Command write optional step returned: %s", err)
 
-                # Wait for measurement data to arrive
-                try:
-                    await asyncio.wait_for(received_data_event.wait(), timeout=8.0)
-                    _LOGGER.info("Successfully received measurement data from %s", self.mac)
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("Timeout waiting for notifications from %s", self.mac)
-
-                # Acknowledge receipt if command characteristic exists
-                if command_char is not None and received_data_event.is_set():
+                    # Wait for measurement data to arrive
                     try:
-                        ack_payload = b"\x20"
-                        await client.write_gatt_char(command_char, ack_payload, response=False)
-                    except Exception:
-                        pass
+                        await asyncio.wait_for(received_data_event.wait(), timeout=8.0)
+                        _LOGGER.info("Successfully received measurement data from %s", self.mac)
+                    except asyncio.TimeoutError:
+                        _LOGGER.debug("Timeout waiting for notifications from %s", self.mac)
+
+                    # Acknowledge receipt if command characteristic exists
+                    if command_char is not None and received_data_event.is_set():
+                        try:
+                            ack_payload = b"\x20"
+                            await client.write_gatt_char(command_char, ack_payload, response=False)
+                        except Exception:
+                            pass
 
             except TimeoutError:
                 _LOGGER.debug(
