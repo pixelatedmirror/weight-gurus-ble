@@ -20,7 +20,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Weight Gurus BLE from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = WeightGurusCoordinator(hass, entry.data)
+    initial_data = {**entry.data, **entry.options}
+    coordinator = WeightGurusCoordinator(hass, initial_data)
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Start the Bluetooth listener
@@ -29,7 +30,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Forward entry setups to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Listen for options updates
+    entry.async_on_unload(entry.add_update_listener(update_listener))
+
     return True
+
+
+async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    coordinator: WeightGurusCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.update_profile({**entry.data, **entry.options})
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

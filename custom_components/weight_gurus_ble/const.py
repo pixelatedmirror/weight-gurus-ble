@@ -7,14 +7,19 @@ DOMAIN: Final = "weight_gurus_ble"
 # Configuration keys
 CONF_MAC: Final = "mac"
 CONF_NAME: Final = "name"
-CONF_HEIGHT: Final = "height_cm"
+CONF_HEIGHT: Final = "height"
+CONF_HEIGHT_UNIT: Final = "height_unit"
 CONF_GENDER: Final = "gender"
 CONF_AGE: Final = "age"
 
 DEFAULT_NAME: Final = "Weight Gurus Scale"
 DEFAULT_HEIGHT_CM: Final = 175
+DEFAULT_HEIGHT_IN: Final = 69
 DEFAULT_AGE: Final = 30
 DEFAULT_GENDER: Final = "unspecified"
+
+UNIT_CM: Final = "cm"
+UNIT_IN: Final = "in"
 
 GENDER_MALE: Final = "male"
 GENDER_FEMALE: Final = "female"

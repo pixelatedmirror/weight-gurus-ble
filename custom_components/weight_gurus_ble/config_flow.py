@@ -16,24 +16,101 @@ from homeassistant.components.bluetooth import (
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+)
 
 from .const import (
     CONF_AGE,
     CONF_GENDER,
     CONF_HEIGHT,
+    CONF_HEIGHT_UNIT,
     CONF_MAC,
     CONF_NAME,
     DEFAULT_AGE,
     DEFAULT_GENDER,
     DEFAULT_HEIGHT_CM,
+    DEFAULT_HEIGHT_IN,
     DEFAULT_NAME,
     DOMAIN,
     GENDER_FEMALE,
     GENDER_MALE,
     GENDER_UNSPECIFIED,
+    UNIT_CM,
+    UNIT_IN,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _build_user_profile_schema(
+    is_metric: bool,
+    default_name: str,
+    current_height: float | None = None,
+    current_unit: str | None = None,
+    current_age: int | None = None,
+    current_gender: str | None = None,
+) -> vol.Schema:
+    """Build a user profile schema using NumberSelectorMode.BOX."""
+    unit = current_unit or (UNIT_CM if is_metric else UNIT_IN)
+    default_height = current_height or (DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN)
+    default_age = current_age or DEFAULT_AGE
+    default_gender = current_gender or DEFAULT_GENDER
+
+    min_h = 50.0 if unit == UNIT_CM else 20.0
+    max_h = 250.0 if unit == UNIT_CM else 100.0
+    step_h = 1.0 if unit == UNIT_CM else 0.5
+
+    return vol.Schema(
+        {
+            vol.Required(CONF_NAME, default=default_name): TextSelector(),
+            vol.Required(CONF_HEIGHT, default=default_height): NumberSelector(
+                NumberSelectorConfig(
+                    min=min_h,
+                    max=max_h,
+                    step=step_h,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(CONF_HEIGHT_UNIT, default=unit): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=UNIT_IN, label="Inches (in)"),
+                        SelectOptionDict(value=UNIT_CM, label="Centimeters (cm)"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="height_unit",
+                )
+            ),
+            vol.Required(CONF_AGE, default=default_age): NumberSelector(
+                NumberSelectorConfig(
+                    min=5,
+                    max=120,
+                    step=1,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="years",
+                )
+            ),
+            vol.Required(CONF_GENDER, default=default_gender): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=GENDER_MALE, label="Male"),
+                        SelectOptionDict(value=GENDER_FEMALE, label="Female"),
+                        SelectOptionDict(value=GENDER_UNSPECIFIED, label="Not specified"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="gender",
+                )
+            ),
+        }
+    )
 
 
 class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -46,6 +123,14 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovery_info: BluetoothServiceInfoBleak | None = None
         self._discovered_device_name: str | None = None
         self._discovered_address: str | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return WeightGurusOptionsFlowHandler(config_entry)
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -75,13 +160,21 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Confirm discovery and configure optional user profile metrics."""
+        """Confirm discovery and configure user profile metrics."""
+        is_metric = self.hass.config.units.is_metric
+
         if user_input is not None:
+            height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if is_metric else DEFAULT_HEIGHT_IN))
+            height_unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
+            height_cm = height_val if height_unit == UNIT_CM else round(height_val * 2.54, 1)
+
             data = {
                 CONF_MAC: self._discovered_address,
                 CONF_NAME: user_input.get(CONF_NAME, self._discovered_device_name),
-                CONF_HEIGHT: user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM),
-                CONF_AGE: user_input.get(CONF_AGE, DEFAULT_AGE),
+                CONF_HEIGHT: height_val,
+                CONF_HEIGHT_UNIT: height_unit,
+                "height_cm": height_cm,
+                CONF_AGE: int(user_input.get(CONF_AGE, DEFAULT_AGE)),
                 CONF_GENDER: user_input.get(CONF_GENDER, DEFAULT_GENDER),
             }
             return self.async_create_entry(
@@ -89,19 +182,9 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data=data,
             )
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME, default=self._discovered_device_name or DEFAULT_NAME): str,
-                vol.Optional(CONF_HEIGHT, default=DEFAULT_HEIGHT_CM): vol.All(
-                    vol.Coerce(int), vol.Range(min=50, max=250)
-                ),
-                vol.Optional(CONF_AGE, default=DEFAULT_AGE): vol.All(
-                    vol.Coerce(int), vol.Range(min=5, max=120)
-                ),
-                vol.Optional(CONF_GENDER, default=DEFAULT_GENDER): vol.In(
-                    [GENDER_MALE, GENDER_FEMALE, GENDER_UNSPECIFIED]
-                ),
-            }
+        schema = _build_user_profile_schema(
+            is_metric=is_metric,
+            default_name=self._discovered_device_name or DEFAULT_NAME,
         )
 
         return self.async_show_form(
@@ -128,7 +211,6 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
             return await self.async_step_confirm()
 
-        # Discover nearby connectable devices to offer a selection list
         discovered_devices: dict[str, str] = {}
         for service_info in async_discovered_service_info(self.hass, connectable=True):
             addr = service_info.address
@@ -147,4 +229,49 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(schema_dict),
             errors=errors,
+        )
+
+
+class WeightGurusOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Weight Gurus BLE to reconfigure profile at any time."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        is_metric = self.hass.config.units.is_metric
+
+        if user_input is not None:
+            height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if is_metric else DEFAULT_HEIGHT_IN))
+            height_unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
+            height_cm = height_val if height_unit == UNIT_CM else round(height_val * 2.54, 1)
+
+            options = {
+                CONF_NAME: user_input.get(CONF_NAME, self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)),
+                CONF_HEIGHT: height_val,
+                CONF_HEIGHT_UNIT: height_unit,
+                "height_cm": height_cm,
+                CONF_AGE: int(user_input.get(CONF_AGE, DEFAULT_AGE)),
+                CONF_GENDER: user_input.get(CONF_GENDER, DEFAULT_GENDER),
+            }
+            return self.async_create_entry(title="", data=options)
+
+        current_data = {**self.config_entry.data, **self.config_entry.options}
+
+        schema = _build_user_profile_schema(
+            is_metric=is_metric,
+            default_name=current_data.get(CONF_NAME, DEFAULT_NAME),
+            current_height=current_data.get(CONF_HEIGHT),
+            current_unit=current_data.get(CONF_HEIGHT_UNIT),
+            current_age=current_data.get(CONF_AGE),
+            current_gender=current_data.get(CONF_GENDER),
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
         )

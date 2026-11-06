@@ -56,7 +56,17 @@ class WeightGurusCoordinator:
         self.entry_data = entry_data
         self.mac: str = entry_data[CONF_MAC].upper()
         self.name: str = entry_data.get(CONF_NAME, "Weight Gurus Scale")
-        self.height_cm: int = entry_data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)
+        self.height_cm: float = float(entry_data.get("height_cm", entry_data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)))
+
+    def update_profile(self, data: dict[str, Any]) -> None:
+        """Update profile parameters from options flow."""
+        self.entry_data.update(data)
+        if CONF_NAME in data:
+            self.name = data[CONF_NAME]
+        if "height_cm" in data or CONF_HEIGHT in data:
+            self.height_cm = float(data.get("height_cm", data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM)))
+            self._calculate_bmi()
+            self._async_notify_listeners()
 
         self._unsubscribe_bluetooth: CALLBACK_TYPE | None = None
         self._listeners: list[Callable[[], None]] = []
