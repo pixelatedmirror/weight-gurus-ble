@@ -8,7 +8,6 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
@@ -20,11 +19,6 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
-    SelectOptionDict,
-    SelectSelector,
-    SelectSelectorConfig,
-    SelectSelectorMode,
-    TextSelector,
 )
 
 from .const import (
@@ -49,66 +43,16 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+GENDER_OPTIONS = {
+    GENDER_MALE: "Male",
+    GENDER_FEMALE: "Female",
+    GENDER_UNSPECIFIED: "Not specified",
+}
 
-def _build_user_profile_schema(
-    is_metric: bool,
-    default_name: str,
-    current_height: float | None = None,
-    current_unit: str | None = None,
-    current_age: int | None = None,
-    current_gender: str | None = None,
-) -> vol.Schema:
-    """Build a user profile schema using NumberSelectorMode.BOX."""
-    unit = current_unit or (UNIT_CM if is_metric else UNIT_IN)
-    default_height = current_height or (DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN)
-    default_age = current_age or DEFAULT_AGE
-    default_gender = current_gender or DEFAULT_GENDER
-
-    min_h = 50.0 if unit == UNIT_CM else 20.0
-    max_h = 250.0 if unit == UNIT_CM else 100.0
-    step_h = 1.0 if unit == UNIT_CM else 0.5
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_NAME, default=default_name): TextSelector(),
-            vol.Required(CONF_HEIGHT, default=default_height): NumberSelector(
-                NumberSelectorConfig(
-                    min=min_h,
-                    max=max_h,
-                    step=step_h,
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(CONF_HEIGHT_UNIT, default=unit): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=UNIT_IN, label="Inches (in)"),
-                        SelectOptionDict(value=UNIT_CM, label="Centimeters (cm)"),
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(CONF_AGE, default=default_age): NumberSelector(
-                NumberSelectorConfig(
-                    min=5,
-                    max=120,
-                    step=1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="years",
-                )
-            ),
-            vol.Required(CONF_GENDER, default=default_gender): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=GENDER_MALE, label="Male"),
-                        SelectOptionDict(value=GENDER_FEMALE, label="Female"),
-                        SelectOptionDict(value=GENDER_UNSPECIFIED, label="Not specified"),
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            ),
-        }
-    )
+UNIT_OPTIONS = {
+    UNIT_IN: "Inches (in)",
+    UNIT_CM: "Centimeters (cm)",
+}
 
 
 class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -118,9 +62,8 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._discovery_info: BluetoothServiceInfoBleak | None = None
-        self._discovered_device_name: str | None = None
         self._discovered_address: str | None = None
+        self._discovered_device_name: str | None = None
 
     @staticmethod
     @callback
@@ -133,9 +76,9 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
     ) -> FlowResult:
-        """Handle the bluetooth discovery step."""
+        """Handle incoming bluetooth auto-discovery."""
         _LOGGER.debug(
-            "Discovered Weight Gurus BLE device: address=%s, name=%s, rssi=%s",
+            "Auto-discovered Weight Gurus BLE device: address=%s, name=%s, rssi=%s",
             discovery_info.address,
             discovery_info.name,
             discovery_info.rssi,
@@ -144,165 +87,106 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery_info.address.lower())
         self._abort_if_unique_id_configured()
 
-        self._discovery_info = discovery_info
-        self._discovered_address = discovery_info.address
+        self._discovered_address = discovery_info.address.upper()
         self._discovered_device_name = discovery_info.name or DEFAULT_NAME
 
-        self.context["title_placeholders"] = {
-            "name": self._discovered_device_name,
-            "address": self._discovered_address,
-        }
-
-        return await self.async_step_confirm()
-
-    async def async_step_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Confirm discovery and configure user profile metrics."""
-        is_metric = self.hass.config.units.is_metric
-
-        if user_input is not None:
-            height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if is_metric else DEFAULT_HEIGHT_IN))
-            height_unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
-            height_cm = height_val if height_unit == UNIT_CM else round(height_val * 2.54, 1)
-
-            data = {
-                CONF_MAC: self._discovered_address,
-                CONF_NAME: user_input.get(CONF_NAME, self._discovered_device_name),
-                CONF_HEIGHT: height_val,
-                CONF_HEIGHT_UNIT: height_unit,
-                "height_cm": height_cm,
-                CONF_AGE: int(user_input.get(CONF_AGE, DEFAULT_AGE)),
-                CONF_GENDER: user_input.get(CONF_GENDER, DEFAULT_GENDER),
-            }
-            return self.async_create_entry(
-                title=data[CONF_NAME],
-                data=data,
-            )
-
-        schema = _build_user_profile_schema(
-            is_metric=is_metric,
-            default_name=self._discovered_device_name or DEFAULT_NAME,
-        )
-
-        return self.async_show_form(
-            step_id="confirm",
-            data_schema=schema,
-            description_placeholders={
-                "name": self._discovered_device_name or DEFAULT_NAME,
-                "address": self._discovered_address or "Unknown",
-            },
-        )
+        return await self.async_step_user()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle manual setup by the user."""
+        """Handle manual or discovery setup on a single unified screen."""
         errors: dict[str, str] = {}
+        is_metric = self.hass.config.units.is_metric
 
         if user_input is not None:
-            address = user_input.get(CONF_ADDRESS, "").strip()
-            manual_address = user_input.get("manual_mac", "").strip()
+            raw_address = (
+                user_input.get("manual_mac", "").strip()
+                or user_input.get(CONF_ADDRESS, self._discovered_address or "").strip()
+            )
+            clean_mac = raw_address.replace("-", ":").upper()
 
-            target_address = manual_address if manual_address else address
-
-            if target_address == "manual" or not target_address:
-                return await self.async_step_manual_mac()
-
-            # Normalize MAC address
-            clean_mac = target_address.replace("-", ":").upper()
-            if len(clean_mac.split(":")) != 6:
+            parts = clean_mac.split(":")
+            if len(parts) != 6 or not all(len(p) == 2 and all(c in "0123456789ABCDEF" for c in p) for p in parts):
                 errors["base"] = "invalid_mac"
             else:
                 await self.async_set_unique_id(clean_mac.lower())
                 self._abort_if_unique_id_configured()
 
-                self._discovered_address = clean_mac
-                self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
-                self.context["title_placeholders"] = {
-                    "name": self._discovered_device_name,
-                    "address": self._discovered_address,
+                unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
+                height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN))
+                height_cm = height_val if unit == UNIT_CM else round(height_val * 2.54, 1)
+
+                data = {
+                    CONF_MAC: clean_mac,
+                    CONF_NAME: user_input.get(CONF_NAME, self._discovered_device_name or DEFAULT_NAME),
+                    CONF_HEIGHT: height_val,
+                    CONF_HEIGHT_UNIT: unit,
+                    "height_cm": height_cm,
+                    CONF_AGE: int(user_input.get(CONF_AGE, DEFAULT_AGE)),
+                    CONF_GENDER: user_input.get(CONF_GENDER, DEFAULT_GENDER),
                 }
-                return await self.async_step_confirm()
 
-        # Discover devices and strictly filter for scale candidates only
+                return self.async_create_entry(
+                    title=data[CONF_NAME],
+                    data=data,
+                )
+
+        # Discover devices and filter for scale candidates
         scale_candidates: dict[str, str] = {}
-
         for service_info in async_discovered_service_info(self.hass, connectable=True):
             addr = service_info.address.upper()
             name = service_info.name or ""
             name_lower = name.lower()
             service_uuids = [str(u).lower() for u in (service_info.service_uuids or [])]
 
-            is_scale_candidate = (
-                any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek"))
+            if (
+                any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek", "greater", "goods", "scale"))
                 or addr.startswith("04:7B:CB")
-                or any("0d005750" in u or "000078b2" in u for u in service_uuids)
-            )
-
-            if is_scale_candidate:
+                or any("0d005750" in u or "000078b2" in u or "0000181d" in u or "0000181b" in u for u in service_uuids)
+            ):
                 display_name = name or "Weight Gurus Scale"
                 scale_candidates[addr] = f"{display_name} ({addr})"
+
+        if self._discovered_address and self._discovered_address not in scale_candidates:
+            scale_candidates[self._discovered_address] = (
+                f"{self._discovered_device_name or 'Weight Gurus Scale'} ({self._discovered_address})"
+            )
+
+        unit = UNIT_CM if is_metric else UNIT_IN
+        default_height = DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN
+        min_h = 50.0 if unit == UNIT_CM else 20.0
+        max_h = 250.0 if unit == UNIT_CM else 100.0
+        step_h = 1.0 if unit == UNIT_CM else 0.5
 
         schema_dict: dict[Any, Any] = {}
 
         if scale_candidates:
-            options = [
-                SelectOptionDict(value=addr, label=desc)
-                for addr, desc in scale_candidates.items()
-            ]
-            options.append(
-                SelectOptionDict(value="manual", label="Enter MAC address manually...")
+            options = dict(scale_candidates)
+            options["manual"] = "Enter another MAC address below"
+            default_addr = (
+                self._discovered_address
+                if (self._discovered_address and self._discovered_address in scale_candidates)
+                else next(iter(scale_candidates))
             )
-            schema_dict[vol.Required(CONF_ADDRESS)] = SelectSelector(
-                SelectSelectorConfig(
-                    options=options,
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            )
+            schema_dict[vol.Required(CONF_ADDRESS, default=default_addr)] = vol.In(options)
+            schema_dict[vol.Optional("manual_mac", default="")] = str
         else:
-            schema_dict[vol.Required(CONF_ADDRESS, default="04:7B:CB:DF:95:CF")] = TextSelector()
+            schema_dict[vol.Required(CONF_ADDRESS)] = str
 
-        schema_dict[vol.Optional(CONF_NAME, default=DEFAULT_NAME)] = TextSelector()
+        schema_dict[vol.Required(CONF_NAME, default=self._discovered_device_name or DEFAULT_NAME)] = str
+        schema_dict[vol.Required(CONF_HEIGHT, default=default_height)] = NumberSelector(
+            NumberSelectorConfig(min=min_h, max=max_h, step=step_h, mode=NumberSelectorMode.BOX)
+        )
+        schema_dict[vol.Required(CONF_HEIGHT_UNIT, default=unit)] = vol.In(UNIT_OPTIONS)
+        schema_dict[vol.Required(CONF_AGE, default=DEFAULT_AGE)] = NumberSelector(
+            NumberSelectorConfig(min=5, max=120, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="years")
+        )
+        schema_dict[vol.Required(CONF_GENDER, default=DEFAULT_GENDER)] = vol.In(GENDER_OPTIONS)
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(schema_dict),
-            errors=errors,
-        )
-
-    async def async_step_manual_mac(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Step to enter MAC address manually."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            clean_mac = user_input[CONF_ADDRESS].strip().replace("-", ":").upper()
-            if len(clean_mac.split(":")) != 6:
-                errors["base"] = "invalid_mac"
-            else:
-                await self.async_set_unique_id(clean_mac.lower())
-                self._abort_if_unique_id_configured()
-
-                self._discovered_address = clean_mac
-                self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
-                self.context["title_placeholders"] = {
-                    "name": self._discovered_device_name,
-                    "address": self._discovered_address,
-                }
-                return await self.async_step_confirm()
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_ADDRESS, default="04:7B:CB:DF:95:CF"): TextSelector(),
-                vol.Optional(CONF_NAME, default=DEFAULT_NAME): TextSelector(),
-            }
-        )
-
-        return self.async_show_form(
-            step_id="manual_mac",
-            data_schema=schema,
             errors=errors,
         )
 
@@ -321,14 +205,14 @@ class WeightGurusOptionsFlowHandler(config_entries.OptionsFlow):
         is_metric = self.hass.config.units.is_metric
 
         if user_input is not None:
-            height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if is_metric else DEFAULT_HEIGHT_IN))
-            height_unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
-            height_cm = height_val if height_unit == UNIT_CM else round(height_val * 2.54, 1)
+            unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
+            height_val = float(user_input.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN))
+            height_cm = height_val if unit == UNIT_CM else round(height_val * 2.54, 1)
 
             options = {
                 CONF_NAME: user_input.get(CONF_NAME, self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)),
                 CONF_HEIGHT: height_val,
-                CONF_HEIGHT_UNIT: height_unit,
+                CONF_HEIGHT_UNIT: unit,
                 "height_cm": height_cm,
                 CONF_AGE: int(user_input.get(CONF_AGE, DEFAULT_AGE)),
                 CONF_GENDER: user_input.get(CONF_GENDER, DEFAULT_GENDER),
@@ -336,14 +220,24 @@ class WeightGurusOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=options)
 
         current_data = {**self.config_entry.data, **self.config_entry.options}
+        unit = current_data.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
+        default_height = float(current_data.get(CONF_HEIGHT, DEFAULT_HEIGHT_CM if unit == UNIT_CM else DEFAULT_HEIGHT_IN))
+        min_h = 50.0 if unit == UNIT_CM else 20.0
+        max_h = 250.0 if unit == UNIT_CM else 100.0
+        step_h = 1.0 if unit == UNIT_CM else 0.5
 
-        schema = _build_user_profile_schema(
-            is_metric=is_metric,
-            default_name=current_data.get(CONF_NAME, DEFAULT_NAME),
-            current_height=current_data.get(CONF_HEIGHT),
-            current_unit=current_data.get(CONF_HEIGHT_UNIT),
-            current_age=current_data.get(CONF_AGE),
-            current_gender=current_data.get(CONF_GENDER),
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME, default=current_data.get(CONF_NAME, DEFAULT_NAME)): str,
+                vol.Required(CONF_HEIGHT, default=default_height): NumberSelector(
+                    NumberSelectorConfig(min=min_h, max=max_h, step=step_h, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Required(CONF_HEIGHT_UNIT, default=unit): vol.In(UNIT_OPTIONS),
+                vol.Required(CONF_AGE, default=int(current_data.get(CONF_AGE, DEFAULT_AGE))): NumberSelector(
+                    NumberSelectorConfig(min=5, max=120, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="years")
+                ),
+                vol.Required(CONF_GENDER, default=current_data.get(CONF_GENDER, DEFAULT_GENDER)): vol.In(GENDER_OPTIONS),
+            }
         )
 
         return self.async_show_form(

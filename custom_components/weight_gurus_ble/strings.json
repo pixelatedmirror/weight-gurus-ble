@@ -3,24 +3,10 @@
     "step": {
       "user": {
         "title": "Set up Weight Gurus Scale",
-        "description": "Select your discovered Weight Gurus scale or enter its Bluetooth MAC address manually.",
+        "description": "Select your discovered Weight Gurus scale and configure your user profile. Height is used to calculate BMI.",
         "data": {
-          "address": "Bluetooth Scale",
-          "name": "Integration Name"
-        }
-      },
-      "manual_mac": {
-        "title": "Enter Scale MAC Address",
-        "description": "Enter the Bluetooth MAC address of your Weight Gurus scale (found on the scale label or from your previous logs).",
-        "data": {
-          "address": "Bluetooth MAC Address",
-          "name": "Integration Name"
-        }
-      },
-      "confirm": {
-        "title": "Configure Scale User Profile",
-        "description": "Configure your scale and user profile settings. Height is used to calculate BMI.",
-        "data": {
+          "address": "Discovered Bluetooth Scale",
+          "manual_mac": "Manual MAC Address (if not discovered or overriding)",
           "name": "Device Name",
           "height": "Height",
           "height_unit": "Height Unit",
@@ -49,21 +35,6 @@
           "age": "Age",
           "gender": "Gender"
         }
-      }
-    }
-  },
-  "selector": {
-    "height_unit": {
-      "options": {
-        "in": "Inches (in)",
-        "cm": "Centimeters (cm)"
-      }
-    },
-    "gender": {
-      "options": {
-        "male": "Male",
-        "female": "Female",
-        "unspecified": "Not specified"
       }
     }
   }
