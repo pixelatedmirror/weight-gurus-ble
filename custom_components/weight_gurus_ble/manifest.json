@@ -12,23 +12,27 @@
   "version": "0.1.1",
   "bluetooth": [
     {
-      "local_name": "Weight Gurus*",
+      "local_name": "00383B*",
       "connectable": true
     },
     {
-      "local_name": "0383*",
+      "local_name": "10383B*",
       "connectable": true
     },
     {
-      "local_name": "0376*",
+      "local_name": "00376B*",
+      "connectable": true
+    },
+    {
+      "local_name": "10376B*",
+      "connectable": true
+    },
+    {
+      "local_name": "Weight*",
       "connectable": true
     },
     {
       "local_name": "GBF*",
-      "connectable": true
-    },
-    {
-      "service_uuid": "0000181d-0000-1000-8000-00805f9b34fb",
       "connectable": true
     },
     {

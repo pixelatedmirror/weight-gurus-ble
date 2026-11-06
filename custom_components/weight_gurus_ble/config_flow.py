@@ -211,19 +211,36 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
             return await self.async_step_confirm()
 
-        discovered_devices: dict[str, str] = {}
+        # Discover devices and highlight scale-like names
+        scale_candidates: dict[str, str] = {}
+        other_devices: dict[str, str] = {}
+
         for service_info in async_discovered_service_info(self.hass, connectable=True):
             addr = service_info.address
             name = service_info.name or "Unknown device"
-            discovered_devices[addr] = f"{name} ({addr})"
+            name_lower = name.lower()
+            if any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek")):
+                scale_candidates[addr] = f"{name} ({addr})"
+            else:
+                other_devices[addr] = f"{name} ({addr})"
+
+        discovered_devices = {**scale_candidates, **other_devices}
 
         schema_dict: dict[Any, Any] = {}
         if discovered_devices:
-            schema_dict[vol.Required(CONF_ADDRESS)] = vol.In(discovered_devices)
+            schema_dict[vol.Required(CONF_ADDRESS)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=addr, label=desc)
+                        for addr, desc in discovered_devices.items()
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         else:
-            schema_dict[vol.Required(CONF_ADDRESS)] = str
+            schema_dict[vol.Required(CONF_ADDRESS)] = TextSelector()
 
-        schema_dict[vol.Optional(CONF_NAME, default=DEFAULT_NAME)] = str
+        schema_dict[vol.Optional(CONF_NAME, default=DEFAULT_NAME)] = TextSelector()
 
         return self.async_show_form(
             step_id="user",
