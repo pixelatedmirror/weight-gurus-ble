@@ -1,0 +1,61 @@
+"""Constants for the Weight Gurus BLE integration."""
+
+from typing import Final
+
+DOMAIN: Final = "weight_gurus_ble"
+
+# Configuration keys
+CONF_MAC: Final = "mac"
+CONF_NAME: Final = "name"
+CONF_HEIGHT: Final = "height_cm"
+CONF_GENDER: Final = "gender"
+CONF_AGE: Final = "age"
+
+DEFAULT_NAME: Final = "Weight Gurus Scale"
+DEFAULT_HEIGHT_CM: Final = 175
+DEFAULT_AGE: Final = 30
+DEFAULT_GENDER: Final = "unspecified"
+
+GENDER_MALE: Final = "male"
+GENDER_FEMALE: Final = "female"
+GENDER_UNSPECIFIED: Final = "unspecified"
+
+# Bluetooth Service and Characteristic UUIDs
+# Weight Gurus / Transtek A3 128-bit base UUID: 0d00xxxx-c36b-11e3-9c1a-0800200c9a66
+UUID_WG_SERVICE: Final = "0d005750-c36b-11e3-9c1a-0800200c9a66"
+UUID_WG_COMMAND: Final = "0d008a20-c36b-11e3-9c1a-0800200c9a66"
+UUID_WG_USER: Final = "0d008a21-c36b-11e3-9c1a-0800200c9a66"
+UUID_WG_BODY: Final = "0d008a22-c36b-11e3-9c1a-0800200c9a66"
+UUID_WG_WEIGHT: Final = "0d008a24-c36b-11e3-9c1a-0800200c9a66"
+
+# Transtek OEM standard 16-bit / 128-bit UUIDs
+UUID_TRANSTEK_SERVICE: Final = "000078b2-0000-1000-8000-00805f9b34fb"
+UUID_TRANSTEK_COMMAND: Final = "00008a20-0000-1000-8000-00805f9b34fb"
+UUID_TRANSTEK_USER: Final = "00008a21-0000-1000-8000-00805f9b34fb"
+UUID_TRANSTEK_BODY: Final = "00008a22-0000-1000-8000-00805f9b34fb"
+UUID_TRANSTEK_WEIGHT: Final = "00008a24-0000-1000-8000-00805f9b34fb"
+
+# Standard Bluetooth SIG Weight Scale Service & Characteristics
+UUID_STANDARD_WEIGHT_SERVICE: Final = "0000181d-0000-1000-8000-00805f9b34fb"
+UUID_STANDARD_WEIGHT_MEASUREMENT: Final = "00002a9d-0000-1000-8000-00805f9b34fb"
+
+# Standard Bluetooth SIG Body Composition Service & Characteristics
+UUID_STANDARD_BODY_SERVICE: Final = "0000181b-0000-1000-8000-00805f9b34fb"
+UUID_STANDARD_BODY_MEASUREMENT: Final = "00002a9c-0000-1000-8000-00805f9b34fb"
+
+ALL_WEIGHT_CHARACTERISTICS: Final = (
+    UUID_WG_WEIGHT,
+    UUID_TRANSTEK_WEIGHT,
+    UUID_STANDARD_WEIGHT_MEASUREMENT,
+)
+
+ALL_BODY_CHARACTERISTICS: Final = (
+    UUID_WG_BODY,
+    UUID_TRANSTEK_BODY,
+    UUID_STANDARD_BODY_MEASUREMENT,
+)
+
+ALL_COMMAND_CHARACTERISTICS: Final = (
+    UUID_WG_COMMAND,
+    UUID_TRANSTEK_COMMAND,
+)
