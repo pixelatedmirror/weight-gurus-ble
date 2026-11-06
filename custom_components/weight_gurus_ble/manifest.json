@@ -9,8 +9,16 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/pixelatedmirror/weight-gurus-ble/issues",
   "requirements": ["bleak-retry-connector>=3.5.0"],
-  "version": "0.1.5",
+  "version": "0.2.0",
   "bluetooth": [
+    {
+      "local_name": "LS212*",
+      "connectable": true
+    },
+    {
+      "local_name": "LS*",
+      "connectable": true
+    },
     {
       "local_name": "00383B*",
       "connectable": true
@@ -57,6 +65,10 @@
     },
     {
       "service_uuid": "0000181b-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    },
+    {
+      "service_uuid": "20568521-5acd-4c5a-9294-eb2691c8b8bf",
       "connectable": true
     }
   ]

@@ -208,46 +208,121 @@ class WeightGurusCoordinator:
 
                 _LOGGER.debug("Connected to %s. Discovering services...", self.mac)
 
-                # Look for matching characteristics
+                # Collect characteristics across all services
+                char_map: dict[str, BleakGATTCharacteristic] = {}
+                for service in client.services:
+                    for char in service.characteristics:
+                        c_uuid = char.uuid.lower()
+                        for key in ("a620", "a621", "a622", "a623", "a624", "a625"):
+                            if key in c_uuid:
+                                char_map[key] = char
+
                 subscribed_any = False
                 command_char: BleakGATTCharacteristic | None = None
 
-                for service in client.services:
-                    for char in service.characteristics:
-                        char_uuid = char.uuid.lower()
+                # 1. Lifesense LS212-B Protocol
+                if "a621" in char_map:
+                    _LOGGER.info("Detected Lifesense LS212-B GATT service on %s, starting handshake", self.mac)
 
-                        if char_uuid in [u.lower() for u in ALL_WEIGHT_CHARACTERISTICS]:
-                            _LOGGER.debug("Subscribing to Weight Characteristic: %s", char_uuid)
-                            await client.start_notify(char, notification_handler)
-                            subscribed_any = True
+                    async def lifesense_notify_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        raw = bytes(data)
+                        _LOGGER.debug("Lifesense notify on %s: %s", char.uuid, raw.hex())
 
-                        elif char_uuid in [u.lower() for u in ALL_BODY_CHARACTERISTICS]:
-                            _LOGGER.debug("Subscribing to Body Characteristic: %s", char_uuid)
-                            await client.start_notify(char, notification_handler)
-                            subscribed_any = True
+                        # Greeting: 10 0a 00 07 ...
+                        if raw.startswith(b"\x10\x0a"):
+                            if "a622" in char_map:
+                                await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
+                            if "a624" in char_map:
+                                await client.write_gatt_char(
+                                    char_map["a624"],
+                                    b"\x10\x0b\x00\x08\x01\x00\x00\x00\x00\x00\x00\x00\x02",
+                                    response=False,
+                                )
 
-                        elif char_uuid in [u.lower() for u in ALL_COMMAND_CHARACTERISTICS]:
-                            command_char = char
+                        # Time sync request: 10 03 00 09 18
+                        elif raw.startswith(b"\x10\x03"):
+                            if "a622" in char_map:
+                                await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
+                            if "a624" in char_map:
+                                now_ts = int(time.time())
+                                ts_be = struct.pack(">I", now_ts)
+                                time_cmd = b"\x10\x08\x00\x0a\x18" + ts_be + b"\x10"
+                                await client.write_gatt_char(char_map["a624"], time_cmd, response=False)
+                                await client.write_gatt_char(char_map["a624"], b"\x10\x03\x10\x04\x01", response=False)
 
-                if not subscribed_any:
-                    _LOGGER.warning(
-                        "No recognized Weight or Body characteristics found on %s. Services: %s",
-                        self.mac,
-                        [s.uuid for s in client.services],
-                    )
+                        # User response: 10 05 10 00 10 04 01
+                        elif raw.startswith(b"\x10\x05\x10\x00\x10\x04"):
+                            if "a622" in char_map:
+                                await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
+                            if "a624" in char_map:
+                                now_ts = int(time.time())
+                                ts_le = struct.pack("<I", now_ts)
+                                await client.write_gatt_char(
+                                    char_map["a624"],
+                                    b"\x10\x09\x10\x02\x03" + ts_le + b"\x30",
+                                    response=False,
+                                )
 
-                # Send sync/timestamp command if command characteristic is present
-                if command_char is not None and "write" in command_char.properties:
-                    try:
-                        timestamp_payload = b"\x02" + struct.pack("<I", int(time.time()))
-                        _LOGGER.debug(
-                            "Writing timestamp sync to %s: %s",
-                            command_char.uuid,
-                            timestamp_payload.hex(),
-                        )
-                        await client.write_gatt_char(command_char, timestamp_payload, response=False)
-                    except Exception as err:
-                        _LOGGER.debug("Command write optional step returned: %s", err)
+                        # Record ready response: 10 05 10 00 10 02
+                        elif raw.startswith(b"\x10\x05\x10\x00\x10\x02"):
+                            if "a622" in char_map:
+                                await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
+                            if "a624" in char_map:
+                                await client.write_gatt_char(char_map["a624"], b"\x10\x04\x48\x01\x00\x01", response=False)
+
+                        # Measurement record: 10 10 48 02 ...
+                        elif raw.startswith(b"\x10\x10\x48\x02") or (len(raw) >= 16 and raw[2] == 0x48):
+                            if "a622" in char_map:
+                                await client.write_gatt_char(char_map["a622"], b"\x00\x01\x01", response=False)
+                            self._parse_lifesense_record(raw)
+                            received_data_event.set()
+
+                    def lifesense_ack_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        _LOGGER.debug("Lifesense scale ACK on %s: %s", char.uuid, bytes(data).hex())
+
+                    def lifesense_indicate_handler(char: BleakGATTCharacteristic, data: bytearray) -> None:
+                        _LOGGER.debug("Lifesense indication on %s: %s", char.uuid, bytes(data).hex())
+
+                    if "a621" in char_map:
+                        await client.start_notify(char_map["a621"], lifesense_notify_handler)
+                    if "a625" in char_map:
+                        await client.start_notify(char_map["a625"], lifesense_ack_handler)
+                    if "a620" in char_map:
+                        await client.start_notify(char_map["a620"], lifesense_indicate_handler)
+
+                    subscribed_any = True
+
+                # 2. Transtek / Standard SIG Protocol Fallback
+                else:
+                    for service in client.services:
+                        for char in service.characteristics:
+                            char_uuid = char.uuid.lower()
+
+                            if char_uuid in [u.lower() for u in ALL_WEIGHT_CHARACTERISTICS]:
+                                _LOGGER.debug("Subscribing to Weight Characteristic: %s", char_uuid)
+                                await client.start_notify(char, notification_handler)
+                                subscribed_any = True
+
+                            elif char_uuid in [u.lower() for u in ALL_BODY_CHARACTERISTICS]:
+                                _LOGGER.debug("Subscribing to Body Characteristic: %s", char_uuid)
+                                await client.start_notify(char, notification_handler)
+                                subscribed_any = True
+
+                            elif char_uuid in [u.lower() for u in ALL_COMMAND_CHARACTERISTICS]:
+                                command_char = char
+
+                    # Send sync/timestamp command if command characteristic is present
+                    if command_char is not None and "write" in command_char.properties:
+                        try:
+                            timestamp_payload = b"\x02" + struct.pack("<I", int(time.time()))
+                            _LOGGER.debug(
+                                "Writing timestamp sync to %s: %s",
+                                command_char.uuid,
+                                timestamp_payload.hex(),
+                            )
+                            await client.write_gatt_char(command_char, timestamp_payload, response=False)
+                        except Exception as err:
+                            _LOGGER.debug("Command write optional step returned: %s", err)
 
                 # Wait for measurement data to arrive
                 try:
@@ -281,6 +356,39 @@ class WeightGurusCoordinator:
 
             if received_data_event.is_set():
                 self._async_notify_listeners()
+
+    def _parse_lifesense_record(self, data: bytes) -> None:
+        """Parse Lifesense LS212-B 0x48 measurement record."""
+        # Frame layout:
+        # 10 10 48 02 00 00 00 00 40 09 37 28 6a ed b9 5c 01 6d
+        if len(data) < 16:
+            return
+
+        try:
+            # Bytes 10-11: Weight in 0.01 kg (big-endian uint16)
+            raw_weight = struct.unpack(">H", data[10:12])[0]
+            self.weight_kg = round(raw_weight / 100.0, 2)
+            self.weight_lbs = round(self.weight_kg * 2.20462262, 1)
+
+            # Bytes 12-15: Timestamp in seconds (big-endian uint32)
+            ts = struct.unpack(">I", data[12:16])[0]
+            if 1500000000 <= ts <= 2500000000:
+                self.last_measurement = datetime.fromtimestamp(ts, tz=timezone.utc)
+            else:
+                self.last_measurement = datetime.now(timezone.utc)
+
+            self._calculate_bmi()
+
+            _LOGGER.info(
+                "Parsed Lifesense measurement from %s: %.1f lbs (%.2f kg), raw=%d, at %s",
+                self.mac,
+                self.weight_lbs,
+                self.weight_kg,
+                raw_weight,
+                self.last_measurement.isoformat(),
+            )
+        except Exception as err:
+            _LOGGER.warning("Error parsing Lifesense record: %s", err)
 
     def _parse_gatt_payload(self, char_uuid: str, data: bytes) -> None:
         """Parse raw byte arrays into measurement properties."""

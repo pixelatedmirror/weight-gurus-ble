@@ -154,9 +154,10 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             service_uuids = [str(u).lower() for u in (service_info.service_uuids or [])]
 
             if (
-                any(p in name_lower for p in ("0383", "0376", "gbf", "weight", "transtek", "greater", "goods", "scale"))
+                any(p in name_lower for p in ("ls212", "lifesense", "0383", "0376", "gbf", "weight", "transtek", "greater", "goods", "scale"))
+                or addr.startswith("A4:C1:38")
                 or addr.startswith("04:7B:CB")
-                or any("0d005750" in u or "000078b2" in u or "0000181d" in u or "0000181b" in u for u in service_uuids)
+                or any("20568521" in u or "0d005750" in u or "000078b2" in u or "0000181d" in u or "0000181b" in u for u in service_uuids)
             ):
                 display_name = name or "Weight Gurus Scale"
                 scale_candidates[addr] = f"{display_name} ({addr})"
