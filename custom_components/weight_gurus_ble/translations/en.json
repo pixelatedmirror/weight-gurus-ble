@@ -18,7 +18,7 @@
         }
       },
       "confirm": {
-        "title": "Configure Weight Gurus Scale ({name})",
+        "title": "Configure Scale User Profile",
         "description": "Configure your scale and user profile settings. Height is used to calculate BMI.",
         "data": {
           "name": "Device Name",

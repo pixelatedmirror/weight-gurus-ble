@@ -86,7 +86,6 @@ def _build_user_profile_schema(
                         SelectOptionDict(value=UNIT_CM, label="Centimeters (cm)"),
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
-                    translation_key="height_unit",
                 )
             ),
             vol.Required(CONF_AGE, default=default_age): NumberSelector(
@@ -106,7 +105,6 @@ def _build_user_profile_schema(
                         SelectOptionDict(value=GENDER_UNSPECIFIED, label="Not specified"),
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
-                    translation_key="gender",
                 )
             ),
         }
@@ -221,6 +219,10 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 self._discovered_address = clean_mac
                 self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
+                self.context["title_placeholders"] = {
+                    "name": self._discovered_device_name,
+                    "address": self._discovered_address,
+                }
                 return await self.async_step_confirm()
 
         # Discover devices and strictly filter for scale candidates only
@@ -285,6 +287,10 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 self._discovered_address = clean_mac
                 self._discovered_device_name = user_input.get(CONF_NAME, DEFAULT_NAME)
+                self.context["title_placeholders"] = {
+                    "name": self._discovered_device_name,
+                    "address": self._discovered_address,
+                }
                 return await self.async_step_confirm()
 
         schema = vol.Schema(
