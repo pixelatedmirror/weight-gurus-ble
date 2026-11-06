@@ -13,13 +13,14 @@ from homeassistant.components.bluetooth import (
     async_discovered_service_info,
 )
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
 )
+from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from .const import (
     CONF_AGE,
@@ -53,6 +54,18 @@ UNIT_OPTIONS = {
     UNIT_IN: "Inches (in)",
     UNIT_CM: "Centimeters (cm)",
 }
+
+
+def _is_metric(hass: HomeAssistant) -> bool:
+    """Determine whether Home Assistant is configured for metric units."""
+    units = getattr(hass.config, "units", None)
+    if units is None:
+        return False
+    return (
+        getattr(units, "is_metric", False)
+        or units is METRIC_SYSTEM
+        or getattr(units, "name", "") == "metric"
+    )
 
 
 class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -97,7 +110,7 @@ class WeightGurusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle manual or discovery setup on a single unified screen."""
         errors: dict[str, str] = {}
-        is_metric = self.hass.config.units.is_metric
+        is_metric = _is_metric(self.hass)
 
         if user_input is not None:
             raw_address = (
@@ -202,7 +215,7 @@ class WeightGurusOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
-        is_metric = self.hass.config.units.is_metric
+        is_metric = _is_metric(self.hass)
 
         if user_input is not None:
             unit = user_input.get(CONF_HEIGHT_UNIT, UNIT_CM if is_metric else UNIT_IN)
